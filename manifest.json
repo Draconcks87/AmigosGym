@@ -2,7 +2,7 @@
   "name": "AmigosGym",
   "short_name": "AmigosGym",
   "description": "El que entrena recibe un jugo para esta mesa",
-  "start_url": "/",
+  "start_url": "/AmigosGym/",
   "display": "standalone",
   "background_color": "#0f0f0f",
   "theme_color": "#1D9E75",
