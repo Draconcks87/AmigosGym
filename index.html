@@ -340,7 +340,7 @@ function renderAuth(){
       <div id="auth-msg"></div>
       <div class="auth-switch">${isReg
         ?`¿Ya tenés cuenta? <button class="btn-link" onclick="toggleAuthMode()">Iniciar sesión</button>`
-        ?`¿No tenés cuenta? <button class="btn-link" onclick="toggleAuthMode()">Registrarse</button>`:''}
+        :`¿No tenés cuenta? <button class="btn-link" onclick="toggleAuthMode()">Registrarse</button>`}
       </div>
       ${db.users.length===0&&!isReg?`<div style="margin-top:1rem;padding:10px;background:var(--bg3);border-radius:8px;font-size:13px;color:var(--text3);text-align:center">Primera vez? <button class="btn-link" onclick="toggleAuthMode()">Creá tu cuenta</button></div>`:''}
     </div>
