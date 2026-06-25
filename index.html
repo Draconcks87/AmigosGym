@@ -125,7 +125,8 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 <body>
 <div id="app"></div>
 <script>
-const STORAGE_KEY='amigosgym_v4';
+const STORAGE_KEY='amigosgym_v3';
+const ADMIN_PIN='028531251';
 const MUSCULOS=[
   {id:'pectorales',name:'Pectorales',emoji:'🫁',url:'https://eresfitness.com/ejercicios/pectorales'},
   {id:'espalda',name:'Espalda',emoji:'🦴',url:'https://eresfitness.com/ejercicios/espalda'},
@@ -266,7 +267,7 @@ const LOG_TYPE={
 };
 
 let db,currentUser,deferredInstall=null;
-let S={screen:'auth',authMode:'login',tab:'ejercicios',muscle:null,exercise:null,exMuscle:null,logSeries:[],logNotas:'',histFilter:'all',searchQ:''};
+let S={screen:'auth',authMode:'login',adminPin:'',tab:'ejercicios',muscle:null,exercise:null,exMuscle:null,logSeries:[],logNotas:'',histFilter:'all',searchQ:''};
 
 function loadDB(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'null')||{users:[],sessions:[]}}catch{return{users:[],sessions:[]}}}
 function saveDB(){localStorage.setItem(STORAGE_KEY,JSON.stringify(db))}
@@ -279,6 +280,18 @@ function loadSession(){
 }
 function clearSession(){localStorage.removeItem(STORAGE_KEY+'_session')}
 db=loadDB();
+// Migrate old keys if needed
+['amigosgym_v1','amigosgym_v2'].forEach(oldKey=>{
+  try{
+    const old=JSON.parse(localStorage.getItem(oldKey)||'null');
+    if(old&&old.users&&old.users.length){
+      if(!db.users.length) db.users=old.users;
+      const existIds=new Set(db.sessions.map(s=>s.id));
+      (old.sessions||[]).forEach(s=>{if(!existIds.has(s.id))db.sessions.push(s)});
+      saveDB();
+    }
+  }catch(e){}
+});
 
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstall=e;render()});
 
@@ -301,7 +314,7 @@ function ic(name){
   return`<svg viewBox="0 0 24 24" aria-hidden="true"><g>${d[name]||''}</g></svg>`;
 }
 
-function render(){document.getElementById('app').innerHTML=S.screen==='auth'?renderAuth():renderMain()}
+function render(){document.getElementById('app').innerHTML=S.screen==='auth'?(S.authMode==='recovery'?renderRecovery():S.authMode==='admin'?renderAdmin():renderAuth()):renderMain()}
 
 // AUTH
 function renderAuth(){
@@ -316,12 +329,26 @@ function renderAuth(){
       <div class="field"><label>Usuario</label><input id="a-user" type="text" placeholder="usuario" autocomplete="username" autocorrect="off" autocapitalize="off"></div>
       <div class="field"><label>Contraseña</label><input id="a-pass" type="password" placeholder="contraseña" autocomplete="${r?'new-password':'current-password'}"></div>
       ${r?`<div class="field"><label>Repetir contraseña</label><input id="a-pass2" type="password" placeholder="repetir" autocomplete="new-password"></div>`:''}
+      ${r?`<div class="field"><label>Pregunta de seguridad</label>
+        <select id="a-pregunta" style="width:100%;padding:12px 14px;border:.5px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg3);color:var(--text);font-size:15px;outline:none;-webkit-appearance:none">
+          <option value="">Elegí una pregunta...</option>
+          <option>¿Cuál es el nombre de tu mascota?</option>
+          <option>¿En qué ciudad naciste?</option>
+          <option>¿Cuál es el nombre de tu mejor amigo/a?</option>
+          <option>¿Cuál fue tu primer equipo de fútbol?</option>
+          <option>¿Cuál es tu comida favorita?</option>
+          <option>¿Cómo se llama tu mamá?</option>
+        </select>
+      </div>
+      <div class="field"><label>Respuesta secreta</label><input id="a-respuesta" type="text" placeholder="Tu respuesta" autocomplete="off" autocorrect="off"></div>`:''}
       <button class="btn-primary" onclick="doAuth()">${r?'Registrarse':'Entrar'}</button>
       <div id="auth-msg"></div>
       <div class="auth-switch">${r
         ?`¿Ya tenés cuenta? <button class="btn-link" onclick="toggleMode()">Iniciar sesión</button>`
         :`¿No tenés cuenta? <button class="btn-link" onclick="toggleMode()">Registrarse</button>`}
       </div>
+      ${!r?`<div style="text-align:center;margin-top:.5rem"><button class="btn-link" onclick="showRecovery()">¿Olvidaste tu usuario o contraseña?</button></div>`:''}
+      ${!r?`<div style="text-align:center;margin-top:.25rem"><button class="btn-link" style="font-size:12px;color:var(--text3)" onclick="showAdmin()">Panel de administrador</button></div>`:''}
     </div>
   </div></div>`;
 }
@@ -337,7 +364,11 @@ function doAuth(){
     if(!name){msg.innerHTML='<div class="msg-err">Ingresá tu nombre</div>';return}
     if(pass!==pass2){msg.innerHTML='<div class="msg-err">Las contraseñas no coinciden</div>';return}
     if(db.users.find(u=>u.username===user)){msg.innerHTML='<div class="msg-err">Ese usuario ya existe</div>';return}
-    const nu={id:'u'+Date.now(),username:user,password:pass,name,customExercises:[]};
+    const pregunta=document.getElementById('a-pregunta')?.value||'';
+    const respuesta=(document.getElementById('a-respuesta')?.value||'').trim().toLowerCase();
+    if(!pregunta){msg.innerHTML='<div class="msg-err">Elegí una pregunta de seguridad</div>';return}
+    if(!respuesta){msg.innerHTML='<div class="msg-err">Escribí tu respuesta secreta</div>';return}
+    const nu={id:'u'+Date.now(),username:user,password:pass,name,pregunta,respuesta,customExercises:[]};
     db.users.push(nu);saveDB();currentUser=nu;saveSession();
     msg.innerHTML='<div class="msg-ok">✓ Cuenta creada</div>';
     setTimeout(()=>{S.screen='main';render()},600);
@@ -683,7 +714,10 @@ function importData(){
         const imp=JSON.parse(ev.target.result);
         if(!imp.sessions) throw new Error('Archivo inválido');
         const existIds=new Set((db.sessions||[]).map(s=>s.id));
-        const newS=imp.sessions.filter(s=>!existIds.has(s.id));
+        // Reasign userId to current user so sessions show up on this device
+        const newS=imp.sessions
+          .filter(s=>!existIds.has(s.id))
+          .map(s=>({...s, userId:currentUser.id}));
         db.sessions=[...(db.sessions||[]),...newS];
         if(imp.user?.customExercises?.length){
           const existCx=new Set((currentUser.customExercises||[]).map(e=>e.id));
@@ -726,6 +760,164 @@ function goBack(){
 }
 function goToLog(id,musc){S.tab='registrar';S.exercise=id;S.exMuscle=musc;S.logSeries=[{}];S.logNotas='';render()}
 function installApp(){if(deferredInstall){deferredInstall.prompt();deferredInstall.userChoice.then(()=>{deferredInstall=null;render()})}}
+
+// RECOVERY
+function showRecovery(){S.authMode='recovery';render()}
+function showAdmin(){S.authMode='admin';render()}
+function renderRecovery(){
+  return`<div class="screen" style="background:var(--bg)"><div class="auth-screen">
+    <div class="auth-logo">🔑</div>
+    <div class="auth-title">Recuperar cuenta</div>
+    <div class="auth-sub">Buscá tu usuario y resetéa tu contraseña</div>
+    <div class="auth-card">
+      <h2>Buscar usuario</h2>
+      <div class="field"><label>Nombre (o parte del nombre)</label><input id="rec-name" type="text" placeholder="ej: Juan"></div>
+      <button class="btn-primary" onclick="buscarUsuarios()">Buscar</button>
+      <div id="rec-results" style="margin-top:1rem"></div>
+      <div class="auth-switch" style="margin-top:1rem"><button class="btn-link" onclick="toggleMode()">Volver al login</button></div>
+    </div>
+  </div></div>`;
+}
+function buscarUsuarios(){
+  const q=(document.getElementById('rec-name').value||'').trim().toLowerCase();
+  if(!q){document.getElementById('rec-results').innerHTML='<div class="msg-err">Escribí al menos un nombre</div>';return}
+  const found=db.users.filter(u=>u.name.toLowerCase().includes(q)||u.username.toLowerCase().includes(q));
+  if(!found.length){document.getElementById('rec-results').innerHTML='<div class="msg-err">No se encontró ningún usuario</div>';return}
+  document.getElementById('rec-results').innerHTML=found.map(u=>`
+    <div style="background:var(--bg3);border:.5px solid var(--border2);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px">
+      <div style="font-size:15px;font-weight:600;margin-bottom:4px">👤 ${u.name}</div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:8px">Usuario: <strong style="color:var(--green)">${u.username}</strong></div>
+      ${u.pregunta?`<button class="btn-outline-sm" onclick="mostrarPregunta('${u.id}')" style="width:100%">Resetear contraseña</button>`:'<div style="font-size:12px;color:var(--text3)">Sin pregunta de seguridad configurada</div>'}
+    </div>`).join('');
+}
+function mostrarPregunta(uid){
+  const u=db.users.find(x=>x.id===uid);
+  if(!u||!u.pregunta) return;
+  document.getElementById('rec-results').innerHTML=`
+    <div style="background:var(--bg3);border:.5px solid var(--border2);border-radius:var(--radius-sm);padding:12px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:4px">👤 ${u.name} · <span style="color:var(--green)">${u.username}</span></div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:8px">❓ ${u.pregunta}</div>
+      <div class="field"><label>Tu respuesta</label><input id="rec-resp" type="text" placeholder="Respuesta secreta" autocorrect="off"></div>
+      <div class="field"><label>Nueva contraseña</label><input id="rec-newpass" type="password" placeholder="Nueva contraseña"></div>
+      <div class="field"><label>Repetir contraseña</label><input id="rec-newpass2" type="password" placeholder="Repetir"></div>
+      <button class="btn-primary" onclick="resetearPass('${uid}')">Cambiar contraseña</button>
+      <div id="rec-msg"></div>
+    </div>`;
+}
+function resetearPass(uid){
+  const u=db.users.find(x=>x.id===uid);
+  const resp=(document.getElementById('rec-resp').value||'').trim().toLowerCase();
+  const np=document.getElementById('rec-newpass').value||'';
+  const np2=document.getElementById('rec-newpass2').value||'';
+  const msg=document.getElementById('rec-msg');
+  if(resp!==u.respuesta){msg.innerHTML='<div class="msg-err">Respuesta incorrecta</div>';return}
+  if(!np||np.length<3){msg.innerHTML='<div class="msg-err">La contraseña debe tener al menos 3 caracteres</div>';return}
+  if(np!==np2){msg.innerHTML='<div class="msg-err">Las contraseñas no coinciden</div>';return}
+  u.password=np;
+  const idx=db.users.findIndex(x=>x.id===uid);
+  if(idx>=0) db.users[idx]=u;
+  saveDB();
+  msg.innerHTML='<div class="msg-ok">✓ Contraseña actualizada. Ya podés iniciar sesión.</div>';
+  setTimeout(()=>{S.authMode='login';render()},1500);
+}
+
+// ADMIN PANEL
+function renderAdmin(){
+  const unlocked=S.adminPin===ADMIN_PIN;
+  return`<div class="screen" style="background:var(--bg)"><div class="auth-screen">
+    <div class="auth-logo">⚙️</div>
+    <div class="auth-title">Panel Admin</div>
+    <div class="auth-sub">AmigosGym · Gestión de usuarios</div>
+    <div class="auth-card" style="max-width:420px">
+      ${!unlocked?`
+        <h2>Acceso administrador</h2>
+        <div class="field"><label>PIN de administrador</label><input id="admin-pin" type="password" placeholder="PIN"></div>
+        <button class="btn-primary" onclick="checkAdminPin()">Entrar</button>
+        <div id="admin-pin-msg"></div>
+        <div class="auth-switch" style="margin-top:1rem"><button class="btn-link" onclick="toggleMode()">Volver al login</button></div>
+      `:`
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+          <h2 style="margin-bottom:0">Usuarios registrados</h2>
+          <button class="btn-green-sm" onclick="showCreateUser()">+ Crear</button>
+        </div>
+        <div id="admin-create-wrap" style="display:none;margin-bottom:1rem">
+          <div style="background:var(--bg3);border:.5px solid var(--border2);border-radius:var(--radius-sm);padding:1rem">
+            <div style="font-size:13px;font-weight:600;color:var(--text2);margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.5px">Nuevo perfil</div>
+            <div class="field"><label>Nombre</label><input id="adm-name" type="text" placeholder="Nombre completo"></div>
+            <div class="field"><label>Usuario</label><input id="adm-user" type="text" placeholder="usuario (sin espacios)" autocorrect="off" autocapitalize="off"></div>
+            <div class="field"><label>Contraseña</label><input id="adm-pass" type="password" placeholder="contraseña inicial"></div>
+            <div style="display:flex;gap:8px">
+              <button class="btn-primary" style="flex:1" onclick="adminCreateUser()">Crear perfil</button>
+              <button class="btn-secondary" style="flex:1;margin:0" onclick="document.getElementById('admin-create-wrap').style.display='none'">Cancelar</button>
+            </div>
+            <div id="adm-create-msg"></div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:1rem">
+          ${db.users.length===0?`<div class="empty-state" style="padding:1.5rem"><div class="emoji">👥</div>Sin usuarios aún</div>`:''}
+          ${db.users.map(u=>`
+          <div style="background:var(--bg3);border:.5px solid var(--border2);border-radius:var(--radius-sm);padding:12px">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <div>
+                <div style="font-size:14px;font-weight:600">${u.name}</div>
+                <div style="font-size:12px;color:var(--text2);margin-top:2px">@${u.username} · ${(db.sessions||[]).filter(s=>s.userId===u.id).length} sesiones</div>
+              </div>
+              <div style="display:flex;gap:6px">
+                <button class="btn-outline-sm" onclick="adminResetPass('${u.id}')">Reset pass</button>
+                <button class="btn-icon" style="color:var(--red)" onclick="adminDeleteUser('${u.id}')">${ic('trash')}</button>
+              </div>
+            </div>
+            <div id="reset-wrap-${u.id}" style="display:none;margin-top:8px">
+              <div class="field" style="margin-bottom:6px"><label>Nueva contraseña</label><input id="reset-pass-${u.id}" type="password" placeholder="Nueva contraseña"></div>
+              <button class="btn-primary" onclick="adminDoReset('${u.id}')">Confirmar</button>
+              <div id="reset-msg-${u.id}"></div>
+            </div>
+          </div>`).join('')}
+        </div>
+        <button class="btn-secondary" onclick="toggleMode()">Volver al login</button>
+      `}
+    </div>
+  </div></div>`;
+}
+function checkAdminPin(){
+  const pin=document.getElementById('admin-pin').value||'';
+  if(pin===ADMIN_PIN){S.adminPin=pin;render();}
+  else{document.getElementById('admin-pin-msg').innerHTML='<div class="msg-err">PIN incorrecto</div>';}
+}
+function showCreateUser(){
+  const w=document.getElementById('admin-create-wrap');
+  if(w) w.style.display=w.style.display==='none'?'block':'none';
+}
+function adminCreateUser(){
+  const name=(document.getElementById('adm-name').value||'').trim();
+  const user=(document.getElementById('adm-user').value||'').trim().toLowerCase();
+  const pass=document.getElementById('adm-pass').value||'';
+  const msg=document.getElementById('adm-create-msg');
+  if(!name||!user||!pass){msg.innerHTML='<div class="msg-err">Completá todos los campos</div>';return}
+  if(db.users.find(u=>u.username===user)){msg.innerHTML='<div class="msg-err">Ese usuario ya existe</div>';return}
+  db.users.push({id:'u'+Date.now(),username:user,password:pass,name,customExercises:[],pregunta:'',respuesta:''});
+  saveDB();
+  msg.innerHTML='<div class="msg-ok">✓ Perfil creado</div>';
+  setTimeout(()=>render(),800);
+}
+function adminResetPass(uid){
+  const w=document.getElementById('reset-wrap-'+uid);
+  if(w) w.style.display=w.style.display==='none'?'block':'none';
+}
+function adminDoReset(uid){
+  const np=document.getElementById('reset-pass-'+uid).value||'';
+  const msg=document.getElementById('reset-msg-'+uid);
+  if(!np||np.length<3){msg.innerHTML='<div class="msg-err">Mínimo 3 caracteres</div>';return}
+  const idx=db.users.findIndex(u=>u.id===uid);
+  if(idx>=0){db.users[idx].password=np;saveDB();msg.innerHTML='<div class="msg-ok">✓ Contraseña actualizada</div>';}
+  setTimeout(()=>render(),800);
+}
+function adminDeleteUser(uid){
+  if(!confirm('¿Eliminar este usuario y todas sus sesiones?')) return;
+  db.users=db.users.filter(u=>u.id!==uid);
+  db.sessions=(db.sessions||[]).filter(s=>s.userId!==uid);
+  saveDB();render();
+}
 
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 // Auto-login from saved session
