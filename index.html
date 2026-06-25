@@ -125,7 +125,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 <body>
 <div id="app"></div>
 <script>
-const STORAGE_KEY='amigosgym_v3';
+const STORAGE_KEY='amigosgym_v4';
 const MUSCULOS=[
   {id:'pectorales',name:'Pectorales',emoji:'🫁',url:'https://eresfitness.com/ejercicios/pectorales'},
   {id:'espalda',name:'Espalda',emoji:'🦴',url:'https://eresfitness.com/ejercicios/espalda'},
@@ -270,6 +270,14 @@ let S={screen:'auth',authMode:'login',tab:'ejercicios',muscle:null,exercise:null
 
 function loadDB(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'null')||{users:[],sessions:[]}}catch{return{users:[],sessions:[]}}}
 function saveDB(){localStorage.setItem(STORAGE_KEY,JSON.stringify(db))}
+function saveSession(){if(currentUser) localStorage.setItem(STORAGE_KEY+'_session',currentUser.id)}
+function loadSession(){
+  const sid=localStorage.getItem(STORAGE_KEY+'_session');
+  if(!sid) return null;
+  const d=loadDB();
+  return d.users.find(u=>u.id===sid)||null;
+}
+function clearSession(){localStorage.removeItem(STORAGE_KEY+'_session')}
 db=loadDB();
 
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstall=e;render()});
@@ -330,13 +338,13 @@ function doAuth(){
     if(pass!==pass2){msg.innerHTML='<div class="msg-err">Las contraseñas no coinciden</div>';return}
     if(db.users.find(u=>u.username===user)){msg.innerHTML='<div class="msg-err">Ese usuario ya existe</div>';return}
     const nu={id:'u'+Date.now(),username:user,password:pass,name,customExercises:[]};
-    db.users.push(nu);saveDB();currentUser=nu;
+    db.users.push(nu);saveDB();currentUser=nu;saveSession();
     msg.innerHTML='<div class="msg-ok">✓ Cuenta creada</div>';
     setTimeout(()=>{S.screen='main';render()},600);
   } else {
     const f=db.users.find(u=>u.username===user&&u.password===pass);
     if(!f){msg.innerHTML='<div class="msg-err">Usuario o contraseña incorrectos</div>';return}
-    currentUser=f;S.screen='main';render();
+    currentUser=f;saveSession();S.screen='main';render();
   }
 }
 
@@ -365,7 +373,7 @@ function renderMain(){
 }
 function setTab(t){S.tab=t;S.muscle=null;S.exercise=null;S.searchQ='';refreshTab()}
 function refreshTab(){document.getElementById('tab-content').innerHTML=renderTab();document.getElementById('main-screen').scrollTop=0}
-function logout(){currentUser=null;S.screen='auth';S.authMode='login';render()}
+function logout(){clearSession();currentUser=null;S.screen='auth';S.authMode='login';render()}
 function renderTab(){
   if(S.tab==='ejercicios') return renderEjercicios();
   if(S.tab==='registrar') return renderRegistrar();
@@ -720,6 +728,9 @@ function goToLog(id,musc){S.tab='registrar';S.exercise=id;S.exMuscle=musc;S.logS
 function installApp(){if(deferredInstall){deferredInstall.prompt();deferredInstall.userChoice.then(()=>{deferredInstall=null;render()})}}
 
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+// Auto-login from saved session
+const savedUser=loadSession();
+if(savedUser){currentUser=savedUser;S.screen='main';}
 render();
 </script>
 </body>

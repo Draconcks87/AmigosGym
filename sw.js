@@ -1,4 +1,4 @@
-const CACHE='amigosgym-v2';
+const CACHE='amigosgym-v4';
 const ASSETS=['/AmigosGym/','/AmigosGym/index.html','/AmigosGym/manifest.json','/AmigosGym/icon-192.svg','/AmigosGym/icon-512.svg'];
 
 self.addEventListener('install',e=>{
@@ -10,15 +10,12 @@ self.addEventListener('activate',e=>{
 self.addEventListener('fetch',e=>{
   if(e.request.method!=='GET') return;
   e.respondWith(
-    caches.match(e.request).then(cached=>{
-      if(cached) return cached;
-      return fetch(e.request).then(res=>{
-        if(res.ok&&e.request.url.startsWith(self.location.origin)){
-          const clone=res.clone();
-          caches.open(CACHE).then(c=>c.put(e.request,clone));
-        }
-        return res;
-      }).catch(()=>caches.match('/AmigosGym/index.html'));
-    })
+    fetch(e.request).then(res=>{
+      if(res.ok&&e.request.url.startsWith(self.location.origin)){
+        const clone=res.clone();
+        caches.open(CACHE).then(c=>c.put(e.request,clone));
+      }
+      return res;
+    }).catch(()=>caches.match(e.request).then(r=>r||caches.match('/AmigosGym/index.html')))
   );
 });
